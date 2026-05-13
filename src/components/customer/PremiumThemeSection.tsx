@@ -59,14 +59,19 @@ export const PremiumThemeSection = () => {
     return window.matchMedia('(max-width: 767px)').matches;
   }, []);
 
-  const getStepSize = useCallback(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return 0;
-    const firstCard = scroller.querySelector('[data-signature-card]') as HTMLDivElement | null;
-    if (!firstCard) return 0;
-    const gap = 20;
-    return firstCard.offsetWidth + gap;
-  }, []);
+const getStepSize = () => {
+  const scroller = scrollerRef.current;
+  if (!scroller) return 0;
+
+  const firstCard = scroller.querySelector('[data-signature-card]') as HTMLDivElement | null;
+  if (!firstCard) return 0;
+
+  const mobileGap = 28;
+  const desktopGap = 20;
+  return isMobileLayout()
+    ? firstCard.offsetHeight + mobileGap
+    : firstCard.offsetWidth + desktopGap;
+};
 
   const jumpToIndex = useCallback((index: number) => {
     const scroller = scrollerRef.current;
@@ -287,55 +292,58 @@ export const PremiumThemeSection = () => {
               <span className="block h-px w-16 bg-gradient-to-l from-transparent to-[#c4a053]" />
             </div>
 
-            <div className="relative mt-10 sm:mt-12 no-select">
+            <div className="relative mt-8 px-2 pt-12 pb-12 sm:mt-10 md:px-0 md:pt-0 no-select">
               <button
-                type="button"
-                onClick={() => scrollDishes(-1)}
-                className="absolute left-2 top-1/2 z-20 -translate-y-1/2 rounded-full border border-[#c4a976] bg-[#e8d5ac] p-2.5 text-[#5c4322] shadow-sm transition-colors hover:bg-[#dabb8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4a053] md:left-0 md:top-1/2 md:-translate-x-0 md:-translate-y-1/2"
-                aria-label="Previous dishes"
-              >
-                <ChevronLeft size={18} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => scrollDishes(1)}
-                className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full border border-[#c4a976] bg-[#e8d5ac] p-2.5 text-[#5c4322] shadow-sm transition-colors hover:bg-[#dabb8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4a053] md:bottom-auto md:left-auto md:right-0 md:top-1/2 md:translate-x-0 md:-translate-y-1/2"
-                aria-label="Next dishes"
-              >
-                <ChevronRight size={18} />
-              </button>
-
-<div    
-  ref={scrollerRef}
-  className="mx-auto max-h-[440px] overflow-x-auto overflow-y-hidden overscroll-x-contain touch-pan-y px-3 py-6 sm:px-6 sm:py-8 scroll-smooth md:mx-11 md:max-h-none md:overflow-hidden md:px-0 md:py-0"
-  style={{ scrollbarWidth: 'none' }}
+  type="button"
+  onClick={() => scrollDishes(-1)}
+  className="absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-full border border-[#c4a976] bg-[#e8d5ac] p-2.5 text-[#5c4322] shadow-sm transition-colors hover:bg-[#dabb8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4a053] md:left-0 md:top-1/2 md:-translate-x-0 md:-translate-y-1/2"
+  aria-label="Previous dishes"
 >
-                <div className="flex flex-row items-stretch md:snap-x md:snap-mandatory gap-5 pt-4 pb-8 [perspective:1000px] w-max md:w-auto md:items-stretch">
+  <ChevronUp size={18} className="md:hidden" />
+  <ChevronLeft size={18} className="hidden md:block" />
+</button>
+
+              <button
+  type="button"
+  onClick={() => scrollDishes(1)}
+  className="absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-full border border-[#c4a976] bg-[#e8d5ac] p-2.5 text-[#5c4322] shadow-sm transition-colors hover:bg-[#dabb8f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4a053] md:bottom-auto md:left-auto md:right-0 md:top-1/2 md:translate-x-0 md:-translate-y-1/2"
+  aria-label="Next dishes"
+>
+  <ChevronDown size={18} className="md:hidden" />
+  <ChevronRight size={18} className="hidden md:block" />
+</button>
+
+
+              <div    
+                ref={scrollerRef}
+                className="mx-auto h-[430px] max-h-[430px] w-full px-1 py-0 scroll-smooth sm:h-[460px] sm:max-h-[460px] md:h-auto md:mx-11 md:max-h-none md:px-0 overflow-hidden"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                <div className="flex flex-col items-center md:flex-row md:items-stretch md:snap-x md:snap-mandatory gap-8 py-0 md:gap-5 md:pt-4 md:pb-8 [perspective:1000px] ">
                   {loopedDishes.map((dish, i) => {
                     const realIndex = i % signatureDishes.length;
                     return (
-                      <motion.div
-                        layout
-                        key={`${dish.name}-${i}`}
-                        data-signature-card
-                        initial={false}
-                        animate={{ opacity: 1 }}
-                        transition={{ duration: 0.45, ease: 'easeOut' }}
-                        className="relative flex h-auto w-[calc(100vw-2rem)] min-w-[calc(100vw-2rem)] shrink-0 snap-start justify-center sm:w-[280px] sm:min-w-[280px] md:w-[240px] md:min-w-[240px] lg:w-[303px] lg:min-w-[303px]"
-                      >
-                        <DishFrame
-                          name={dish.name}
-                          image={dish.image}
-                          description={dish.description}
-                        />
-                        {realIndex !== signatureDishes.length + 1 && (
-                          <div className="no-select absolute right-[-10px] top-0 hidden h-full md:block">
-                            <div className="absolute left-1/2 top-16 h-[calc(75%+16px)] w-[2px] -translate-x-1/2 bg-[#c6a96d]" />
-                            <div className="absolute left-1/2 top-16 h-[calc(75%+20px)] w-[7px] -translate-x-1/2 bg-gradient-to-b from-transparent via-[#dcc18a]/55 to-transparent blur-[1px]" />
-                          </div>
-                        )}
-                      </motion.div>
+                    <motion.div
+                      layout
+                      key={`${dish.name}-${i}`}
+                      data-signature-card
+                      initial={false}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.45, ease: 'easeOut' }}
+                      className="relative flex h-auto w-[260px] min-w-[260px] shrink-0 snap-start justify-center md:w-[275px] md:min-w-[275px] lg:w-[303px] lg:min-w-[303px]"
+                    >
+                      <DishFrame
+              name={dish.name}
+              image={dish.image}
+              description={dish.description}
+            />
+             {realIndex !== signatureDishes.length + 1 && (
+                <div className="no-select absolute right-[-10px] top-0 hidden h-full md:block">
+                  <div className="absolute left-1/2 top-16 h-[calc(75%+16px)] w-[2px] -translate-x-1/2 bg-[#c6a96d]" />
+                  <div className="absolute left-1/2 top-16 h-[calc(75%+20px)] w-[7px] -translate-x-1/2 bg-gradient-to-b from-transparent via-[#dcc18a]/55 to-transparent blur-[1px]" />
+                </div>
+              )}
+                    </motion.div>
                     );
                   })}
                 </div>
