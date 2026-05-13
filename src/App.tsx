@@ -22,10 +22,7 @@ import { MenuPage } from '@/pages/customer/MenuPage';
 import { CartPage } from '@/pages/customer/CartPage';
 import { OrderOnlinePage } from '@/pages/customer/order_online';
 import { BookingPage } from '@/pages/customer/BookingPage';
-import BookingSelectionPage from '@/pages/customer/BookingSelectionPage';
-import BookingDetailsPage from '@/pages/customer/BookingDetailsPage';
-import BookingPaymentPage from '@/pages/customer/BookingPaymentPage';
-
+import { BookingCheckoutPage } from '@/pages/customer/BookingCheckoutPage';
 import { BookingConfirmationPage } from '@/pages/customer/BookingConfirmationPage';
 import { CustomerAuthPage } from '@/pages/customer/CustomerAuthPage';
 import { CustomerDashboardPage } from '@/pages/customer/CustomerDashboardPage';
@@ -40,8 +37,7 @@ import { EmployeeDashboard } from '@/pages/employee/EmployeeDashboard';
 import { EmployeeBookings } from '@/pages/employee/EmployeeBookings';
 import { EmployeeMenu } from '@/pages/employee/EmployeeMenu';
 import { LoginPage } from '@/pages/LoginPage';
-import { SupportHarmanPage } from './pages/SupportHarmanPage';
-import { FloatingSupportButton } from './components/support/FloatingSupportButton';
+import { BookingPaymentPage } from './pages/customer/BookingPaymentPage';
 
 // Register GSAP plugins
 gsap.registerPlugin(ScrollTrigger);
@@ -265,10 +261,11 @@ function App() {
         <Route path="/" element={<CustomerLayout />}>
           <Route index element={<HomePage />} />
           <Route path="menu" element={<MenuPage />} />
-          <Route path="online-order" element={<OrderOnlinePage />} />
           <Route path="cart" element={<CartPage />} />
-          <Route path="confirmation" element={<BookingConfirmationPage />} />
-          <Route path="support-harman" element={<SupportHarmanPage />} />
+          <Route path="book" element={<BookingPage />} />
+          <Route path="book/checkout" element={<BookingCheckoutPage />} />
+          <Route path="book/payment" element={<BookingPaymentPage />} />
+          <Route path="book/confirmation/:bookingId" element={<BookingConfirmationPage />} />
         </Route>
 
         <Route path="/login" element={<LoginPage />} />

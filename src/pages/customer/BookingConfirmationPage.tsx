@@ -207,7 +207,13 @@ export const BookingConfirmationPage = () => {
       navigate('/book', { replace: true });
       return;
     }
-  }, [booking, navigate]);
+
+    setBooking(result.booking);
+    setIsLoading(false);
+  };
+
+  void loadBooking();
+}, [bookingId, bookings, location.state, navigate]);
 
   useEffect(() => {
     if (!booking || hasCelebratedRef.current) {
