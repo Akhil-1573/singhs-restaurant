@@ -17,6 +17,8 @@ import { jsPDF } from 'jspdf';
 import confetti from 'canvas-confetti';
 import { toast } from 'sonner';
 import type { Booking } from '@/types';
+import { useBookingStore } from '@/store';
+import { getBookingByBookingId } from '@/lib/supabaseBookingApi';
 
 interface BookingCharges {
   baseDepositAmount: number;
@@ -175,8 +177,35 @@ export const BookingConfirmationPage = () => {
   };
 
   useEffect(() => {
-    if (!booking) {
-      navigate('/');
+  if (!bookingId) {
+    navigate('/book', { replace: true });
+    return;
+  }
+
+  const stateBooking = location.state?.booking as Booking | undefined;
+
+  if (stateBooking?.bookingId === bookingId) {
+    setBooking(stateBooking);
+    setIsLoading(false);
+    return;
+  }
+
+  const storeBooking = bookings.find((item) => item.bookingId === bookingId);
+
+  if (storeBooking) {
+    setBooking(storeBooking);
+    setIsLoading(false);
+    return;
+  }
+
+  const loadBooking = async () => {
+    setIsLoading(true);
+
+    const result = await getBookingByBookingId(bookingId);
+
+    if (!result.ok || !result.booking) {
+      navigate('/book', { replace: true });
+      return;
     }
   }, [booking, navigate]);
 
@@ -212,7 +241,19 @@ export const BookingConfirmationPage = () => {
     return () => window.clearTimeout(timer);
   }, [booking]);
 
-  if (!booking) return null;
+if (isLoading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#f5f1ed]">
+      <div className="rounded-2xl bg-white px-8 py-6 shadow-lg text-amber-900">
+        Loading your booking confirmation...
+      </div>
+    </div>
+  );
+}
+
+if (!booking) {
+  return null;
+}
 
   const paidAmount = charges?.totalPaid ?? booking.depositAmount;
   const paidLabel = charges?.cartSubtotal ? 'Payment Received' : 'Deposit Paid';
@@ -460,7 +501,8 @@ export const BookingConfirmationPage = () => {
         {/* </div> */}
       </div>
     </div>
-  );
+  </main>
+);
 };
 
 export default BookingConfirmationPage;

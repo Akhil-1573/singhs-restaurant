@@ -1,20 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
+  ArrowRight,
   Calendar,
-  Clock,
-  Users,
-  CreditCard,
-  Check,
-  Shield,
-  LockKeyhole,
-  BadgeCheck,
   ChevronDown,
+  Clock,
   Search,
+  Users,
+  LockKeyhole,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Calendar as DateCalendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { useBookingStore, useCustomerAuthStore, useMenuCartStore, useTableStore } from '@/store';
@@ -28,113 +22,25 @@ import { Elements, CardElement, useStripe, useElements } from '@stripe/react-str
 const stripePromise = loadStripe('pk_test_your_publishable_key');
 
 const baseSlotTimes = [
-  '11:00',  '11:30', 
-  '12:00',  '12:30', 
-  '13:00',  '13:30', 
-  '14:00',  '14:30', 
-  '18:00',  '18:30', 
-  '19:00', '19:30', 
-  '20:00',  '20:30', 
-  '21:00',  '21:30',
+  '11:00', '11:30',
+  '12:00', '12:30',
+  '13:00', '13:30',
+  '14:00', '14:30',
+  '18:00', '18:30',
+  '19:00', '19:30',
+  '20:00', '20:30',
+  '21:00', '21:30',
 ];
 
-const PaymentForm = ({ 
-  onSuccess, 
-  amount 
-}: { 
-  onSuccess: () => Promise<{ ok: boolean; error?: string }>; 
-  amount: number;
-}) => {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!stripe || !elements) return;
-
-    setIsProcessing(true);
-    setError('');
-
-    // Simulate payment processing, then persist booking.
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const result = await onSuccess();
-
-    if (!result.ok) {
-      setError(result.error ?? 'Unable to save your booking. Please try again.');
-    }
-
-    setIsProcessing(false);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <div className="rounded-2xl border border-amber-200/70 bg-white/90 p-5 sm:p-6 shadow-[0_14px_38px_rgba(128,78,24,0.12)]">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <Label className="text-amber-950 text-base font-semibold block">Card Details</Label>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 text-[11px] uppercase tracking-[0.12em]">
-            <LockKeyhole size={12} />
-            Encrypted
-          </span>
-        </div>
-
-        <div className="rounded-xl border border-amber-200/80 bg-white px-4 py-4 shadow-inner">
-          <CardElement
-            options={{
-              style: {
-                base: {
-                  fontSize: '16px',
-                  color: '#3F2A1D',
-                  '::placeholder': {
-                    color: '#9C7A60',
-                  },
-                },
-              },
-            }}
-          />
-        </div>
-        <p className="text-amber-800/70 text-xs mt-3">
-          Your payment details are processed securely and never stored on our servers.
-        </p>
-        {error && (
-          <p className="text-rose-600 text-sm mt-2 font-medium">{error}</p>
-        )}
-      </div>
-
-      <Button
-        type="submit"
-        disabled={!stripe || isProcessing}
-        className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white font-semibold shadow-[0_12px_24px_rgba(180,95,25,0.28)] disabled:opacity-50"
-      >
-        {isProcessing ? (
-          <span className="flex items-center gap-2">
-            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            Processing secure payment...
-          </span>
-        ) : (
-          <span className="flex items-center gap-2">
-            <CreditCard size={18} />
-            Pay {formatCurrency(amount)} now
-          </span>
-        )}
-      </Button>
-
-      <div className="grid sm:grid-cols-3 gap-2.5 text-xs">
-        <div className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-200/80 bg-white/90 px-3 py-2 text-amber-900/80 font-medium">
-          <Shield size={13} /> PCI compliant
-        </div>
-        <div className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-200/80 bg-white/90 px-3 py-2 text-amber-900/80 font-medium">
-          <LockKeyhole size={13} /> 256-bit SSL
-        </div>
-        <div className="inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-200/80 bg-white/90 px-3 py-2 text-amber-900/80 font-medium">
-          <BadgeCheck size={13} /> Verified checkout
-        </div>
-      </div>
-    </form>
-  );
-};
+const openingTimes = [
+  { day: 'Monday', time: '11:30am – 9:30pm' },
+  { day: 'Tuesday', time: '11:30am – 9:30pm' },
+  { day: 'Wednesday', time: '11:30am – 9:30pm' },
+  { day: 'Thursday', time: '11:30am – 9:30pm' },
+  { day: 'Friday', time: '11:30am – 10:00pm' },
+  { day: 'Saturday', time: '11:30am – 10:00pm' },
+  { day: 'Sunday', time: '11:30am – 8:00pm' },
+];
 
 export const BookingPage = () => {
   const navigate = useNavigate();
@@ -260,22 +166,35 @@ export const BookingPage = () => {
 
   // Time slot generation
   const guestOptions = Array.from({ length: 10 }, (_, i) => i + 1);
+
   const timeFilterOptions = [
-    'All Times',
-    '11:00', '12:00', '13:00', '14:00',
-    '18:00', '19:00', '20:00', '21:00'
+    '11:00',
+    '12:00',
+    '13:00',
+    '14:00',
+    '18:00',
+    '19:00',
+    '20:00',
+    '21:00',
   ];
 
-  // Memoized slot computation - uses draft values for real-time updates
+  const selectedBookingDate = useMemo(() => {
+    return format(draftDate, 'yyyy-MM-dd');
+  }, [draftDate]);
+
   const visibleSlots = useMemo(() => {
-    const filteredTimes = draftTimeFilter === 'All Times'
-      ? baseSlotTimes
-      : baseSlotTimes.filter(time => time.startsWith(draftTimeFilter.slice(0, 2)));
+    const filteredTimes = baseSlotTimes.filter((time) =>
+      time.startsWith(draftTimeFilter.slice(0, 2))
+    );
 
     return filteredTimes.map((time, index) => {
-      const seed = draftDate.getDate() + draftGuests + (index * 2);
+      const seed = draftDate.getDate() + draftGuests + index * 2;
       const available = seed % 7 !== 0;
-      return { time, available };
+
+      return {
+        time,
+        available,
+      };
     });
   }, [draftDate, draftGuests, draftTimeFilter]);
 
@@ -323,42 +242,51 @@ export const BookingPage = () => {
 
   const handleTimeFilterSelect = (time: string) => {
     setDraftTimeFilter(time);
-
-    if (time === 'All Times') {
-      setSelectedSlotTime('');
-      return;
-    }
-
     setSelectedSlotTime(time);
+    setActiveSearchSection(null);
+    setHasSearched(false);
+    setSelectedTable(null);
   };
 
   const applySearchFilters = () => {
-    // Collapse all sections and reset slot selection for a clean UX
-    setSelectedSlotTime('');
+    const firstAvailableSlot = visibleSlots.find((slot) => slot.available);
+
+    if (!selectedSlotTime && firstAvailableSlot) {
+      setSelectedSlotTime(firstAvailableSlot.time);
+    }
+
+    setHasSearched(true);
     setActiveSearchSection(null);
   };
 
   const continueWithSelectedSlot = () => {
-    if (!selectedSlotTime) return;
-    setSelectedDate(format(draftDate, 'yyyy-MM-dd'));
+    if (!selectedSlotTime) {
+      return;
+    }
+
+    const dateString = format(draftDate, 'yyyy-MM-dd');
+    const tableQuery = selectedTable?.id ? `&tableId=${selectedTable.id}` : '';
+
+    setSelectedDate(dateString);
     setSelectedTime(selectedSlotTime);
     setSelectedGuests(draftGuests);
+
+    navigate(
+      `/book/checkout?date=${dateString}&time=${selectedSlotTime}&guests=${draftGuests}${tableQuery}`
+    );
   };
 
-  // If no slot is selected yet, show premium booking entry
-  if (!selectedDate || !selectedTime) {
-    return (
-      <div className="min-h-screen relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #f5f1ed 0%, #faf8f6 100%)' }}>
-        
-        {/* Full-height decorative rose - left side (mirrored) */}
-        <div className="absolute inset-0 opacity-35 pointer-events-none">
-          <img
-            src="/bookfirstpage.png"
-            alt=""
-            className="w-full h-full object-cover"
-            style={{ transform: 'scaleX(-1)' }}
-          />
-        </div>
+  return (
+    <main className="relative min-h-screen overflow-hidden bg-[#efe8dc] px-3 py-3 sm:px-4 lg:px-5">
+      {/* Floral background */}
+      <div className="absolute inset-0 opacity-45">
+        <img
+          src="/bookfirstpage.png"
+          alt=""
+          className="h-full w-full object-cover"
+          draggable={false}
+        />
+      </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 relative z-10">
           <div className="grid lg:grid-cols-[1.1fr_1fr] gap-6 sm:gap-8 items-start">
@@ -513,111 +441,192 @@ export const BookingPage = () => {
                 <p className="text-amber-200/70 text-xs mt-1 tracking-widest uppercase">Select Your Dining Slot</p>
               </div>
 
-              {/* Filter Bar - Real-time Updates */}
-              <div className="bg-white/95 px-6 py-4 border-b border-black/8 flex flex-wrap items-center gap-3 sm:gap-4">
-                <Search size={18} className="text-black/40" />
-                <span className="text-black/60 text-sm font-medium flex items-center gap-1.5 transition-all">
-                  <Users size={16} /> {draftGuests}
-                </span>
-                <span className="w-px h-4 bg-black/15" />
-                <span className="text-black/60 text-sm font-medium flex items-center gap-1.5 transition-all">
-                  <Calendar size={16} /> {draftDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                </span>
-                <span className="w-px h-4 bg-black/15" />
-                <span className="text-black/60 text-sm font-medium flex items-center gap-1.5 transition-all">
-                  <Clock size={16} /> {draftTimeFilter}
-                </span>
+              <div className="flex items-center justify-center gap-2 border-r border-[#d9cbb8] px-2 py-2.5 text-sm font-medium">
+                <Calendar size={17} className="text-[#9a7338]" />
+                {draftDate.toLocaleDateString('en-GB', {
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })}
               </div>
 
-              {/* Search Sections - Scrollable */}
-              <div className="bg-amber-50/50 px-6 py-5 space-y-3">
-                
-                {/* Guests Section */}
-                <div className="bg-white rounded-lg overflow-hidden border border-black/10 hover:border-black/20 transition-colors">
-                  <button
-                    onClick={() => setActiveSearchSection(activeSearchSection === 'guests' ? null : 'guests')}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
-                  >
-                    <span className="font-medium text-black/80">Number of Guests</span>
-                    <ChevronDown size={18} className={`text-black/40 transition-transform ${activeSearchSection === 'guests' ? 'rotate-180' : ''}`} />
-                  </button>
-                  {activeSearchSection === 'guests' && (
-                    <div className="px-4 py-4 bg-gradient-to-br from-white to-amber-50/30 border-t border-black/8 grid grid-cols-5 gap-2">
-                      {guestOptions.map(num => (
-                        <button
-                          key={num}
-                          onClick={() => setDraftGuests(num)}
-                          className={`py-2 rounded-lg font-medium text-sm transition-all ${
-                            draftGuests === num
-                              ? 'bg-amber-600 text-white shadow-md'
-                              : 'bg-white border border-black/15 text-black/70 hover:border-amber-400'
-                          }`}
-                        >
-                          {num}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              <div className="flex items-center justify-center gap-2 px-2 py-2.5 text-sm font-medium">
+                <Clock size={17} className="text-[#9a7338]" />
+                {selectedSlotTime || draftTimeFilter}
+              </div>
+            </div> */}
+          </div>
 
-                {/* Date Section */}
-                <div className="bg-white rounded-lg overflow-hidden border border-black/10 hover:border-black/20 transition-colors">
-                  <button
-                    onClick={() => setActiveSearchSection(activeSearchSection === 'date' ? null : 'date')}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
-                  >
-                    <span className="font-medium text-black/80">Select Date</span>
-                    <ChevronDown size={18} className={`text-black/40 transition-transform ${activeSearchSection === 'date' ? 'rotate-180' : ''}`} />
-                  </button>
-                  {activeSearchSection === 'date' && (
-                    <div className="px-4 py-4 bg-gradient-to-br from-white to-amber-50/30 border-t border-black/8 flex justify-center">
-                      <DateCalendar
-                        mode="single"
-                        selected={draftDate}
-                        onSelect={(date) => {
-                          if (date) setDraftDate(date);
-                        }}
-                        disabled={(date) => date < new Date()}
-                        className="scale-90 origin-top"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Time Section */}
-                <div className="bg-white rounded-lg overflow-hidden border border-black/10 hover:border-black/20 transition-colors">
-                  <button
-                    onClick={() => setActiveSearchSection(activeSearchSection === 'time' ? null : 'time')}
-                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-amber-50/50 transition-colors"
-                  >
-                    <span className="font-medium text-black/80">Time Preference</span>
-                    <ChevronDown size={18} className={`text-black/40 transition-transform ${activeSearchSection === 'time' ? 'rotate-180' : ''}`} />
-                  </button>
-                  {activeSearchSection === 'time' && (
-                    <div className="px-4 py-3 bg-gradient-to-br from-white to-amber-50/30 border-t border-black/8 grid grid-cols-3 gap-2">
-                      {timeFilterOptions.map(time => (
-                        <button
-                          key={time}
-                          onClick={() => handleTimeFilterSelect(time)}
-                          className={`py-2 rounded-lg font-medium text-sm transition-all ${
-                            selectedSlotTime === time || draftTimeFilter === time
-                              ? 'bg-amber-600 text-white shadow-md'
-                              : 'bg-white border border-black/15 text-black/70 hover:border-amber-400'
-                          }`}
-                        >
-                          {time}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+          {/* Search controls */}
+          <div className="border-y border-[#eadfce] bg-white/35 px-4 py-3 sm:px-5 lg:px-7">
+            <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
+              {/* Guests */}
+              <div className="relative">
+                <p className="mb-1.5 text-xs font-semibold text-[#3d3128]">
+                  Number of Guests
+                </p>
 
                 <button
-                  onClick={applySearchFilters}
-                  className="w-full mt-2 px-4 py-3 rounded-lg bg-amber-700 hover:bg-amber-800 text-white font-medium transition-all shadow-md hover:shadow-lg text-sm uppercase tracking-wide"
+                  type="button"
+                  onClick={() =>
+                    setActiveSearchSection(activeSearchSection === 'guests' ? null : 'guests')
+                  }
+                  className="flex h-11 w-full items-center justify-between rounded-xl border border-[#d9cbb8] bg-[#fffdf8] px-5 text-left shadow-sm transition hover:border-[#b98b42]"
                 >
-                  Search Available Slots
+                  <span className="flex items-center gap-3 text-sm font-medium text-[#4b3e33]">
+                    <Users size={18} className="text-[#9a7338]" />
+                    {draftGuests} Guests
+                  </span>
+                  <ChevronDown size={18} className="text-[#8a7c6d]" />
                 </button>
+
+                {activeSearchSection === 'guests' && (
+                  <div className="absolute z-30 mt-2 grid w-full grid-cols-5 gap-2 rounded-2xl border border-[#e1d2bf] bg-white p-3 shadow-xl">
+                    {guestOptions.map((guest) => (
+                      <button
+                        key={guest}
+                        type="button"
+                        onClick={() => {
+                          setDraftGuests(guest);
+                          setActiveSearchSection(null);
+                          setSelectedTable(null);
+                          setHasSearched(false);
+                        }}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                          draftGuests === guest
+                            ? 'bg-[#b98b42] text-white'
+                            : 'bg-[#f8f1e8] text-[#4b3e33] hover:bg-[#efdfc9]'
+                        }`}
+                      >
+                        {guest}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Date */}
+              <div className="relative">
+                <p className="mb-1.5 text-xs font-semibold text-[#3d3128]">
+                  Select Date
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveSearchSection(activeSearchSection === 'date' ? null : 'date')
+                  }
+                  className="flex h-11 w-full items-center justify-between rounded-xl border border-[#d9cbb8] bg-[#fffdf8] px-5 text-left shadow-sm transition hover:border-[#b98b42]"
+                >
+                  <span className="flex items-center gap-3 text-sm font-medium text-[#4b3e33]">
+                    <Calendar size={18} className="text-[#9a7338]" />
+                    {draftDate.toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </span>
+                  <ChevronDown size={18} className="text-[#8a7c6d]" />
+                </button>
+
+                {activeSearchSection === 'date' && (
+                  <div className="absolute z-30 mt-2 rounded-2xl border border-[#e1d2bf] bg-white p-3 shadow-xl">
+                    <DateCalendar
+                      mode="single"
+                      selected={draftDate}
+                      onSelect={(date) => {
+                        if (!date) return;
+                        setDraftDate(date);
+                        setActiveSearchSection(null);
+                        setSelectedTable(null);
+                        setHasSearched(false);
+                      }}
+                      disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                      className="rounded-xl bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Time */}
+              <div className="relative">
+                <p className="mb-1.5 text-xs font-semibold text-[#3d3128]">
+                  Time Preference
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveSearchSection(activeSearchSection === 'time' ? null : 'time')
+                  }
+                  className="flex h-11 w-full items-center justify-between rounded-xl border border-[#d9cbb8] bg-[#fffdf8] px-5 text-left shadow-sm transition hover:border-[#b98b42]"
+                >
+                  <span className="flex items-center gap-3 text-sm font-medium text-[#4b3e33]">
+                    <Clock size={18} className="text-[#9a7338]" />
+                    {draftTimeFilter}
+                  </span>
+                  <ChevronDown size={18} className="text-[#8a7c6d]" />
+                </button>
+
+                {activeSearchSection === 'time' && (
+                  <div className="absolute z-30 mt-2 grid w-full grid-cols-3 gap-2 rounded-2xl border border-[#e1d2bf] bg-white p-3 shadow-xl">
+                    {timeFilterOptions.map((time) => (
+                      <button
+                        key={time}
+                        type="button"
+                        onClick={() => handleTimeFilterSelect(time)}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                          draftTimeFilter === time
+                            ? 'bg-[#b98b42] text-white'
+                            : 'bg-[#f8f1e8] text-[#4b3e33] hover:bg-[#efdfc9]'
+                        }`}
+                      >
+                        {time}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={applySearchFilters}
+                className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#c39243,#a56f25)] px-8 text-sm font-bold uppercase tracking-[0.12em] text-white shadow-[0_12px_28px_rgba(165,111,37,0.32)] transition hover:scale-[1.01] hover:shadow-[0_16px_34px_rgba(165,111,37,0.4)]"
+              >
+                <Search size={17} />
+                Search Available Slots
+                <ArrowRight size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* Bottom content */}
+          <div className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-[240px_1fr] lg:px-7 lg:py-5">
+            {/* Opening times card */}
+            <aside className="rounded-[1.2rem] border border-[#eadfce] bg-white/45 p-4 shadow-sm backdrop-blur-md">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[#d5b77a] bg-[#fff7e8] text-[#a8752b]">
+                  <Clock size={18} />
+                </span>
+                <h2 className="text-sm font-bold uppercase tracking-[0.18em] text-[#a8752b]">
+                  Opening Times
+                </h2>
+              </div>
+
+              <div className="space-y-2">
+                {openingTimes.map((item) => (
+                  <div
+                    key={item.day}
+                    className="flex items-center justify-between border-b border-[#eadfce]/70 pb-1.5 last:border-b-0"
+                  >
+                    <span className="text-sm font-medium text-[#5e5146]">
+                      {item.day}
+                    </span>
+                    <span className="text-sm text-[#7e7165]">
+                      {item.time}
+                    </span>
+                  </div>
+                ))}
               </div>
 
               {/* Slots Grid - Only show after Time Preference is selected */}
@@ -1085,49 +1094,31 @@ export const BookingPage = () => {
                       <span className="font-semibold">{formatCurrency(cartSubtotal)}</span>
                     </div>
                   )}
-                  <div className="mt-3 flex items-center justify-between border-t border-amber-200 pt-3 text-amber-950">
-                    <span className="font-semibold uppercase tracking-wide text-xs">Pay Now</span>
-                    <span className="font-serif text-xl font-semibold">{formatCurrency(totalChargeNow)}</span>
-                  </div>
-                </div>
-                
-                <Elements stripe={stripePromise}>
-                  <PaymentForm 
-                    onSuccess={handlePaymentSuccess}
-                    amount={totalChargeNow}
-                  />
-                </Elements>
-                
-                {saveError && (
-                  <p className="mt-4 text-center text-sm text-red-600 font-semibold">{saveError}</p>
-                )}
-                
-                <button
-                  onClick={() => setStep(1)}
-                  className="w-full text-center text-amber-700 hover:text-amber-900 transition-colors mt-4 font-semibold"
-                >
-                  Back to details
-                </button>
-              </div>
-            )}
 
-            {/* Step 3: Confirmation */}
-            {isConfirmed && (
-              <div className="px-8 py-12 text-center">
-                <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-6">
-                  <Check size={32} className="text-emerald-600" />
+                  <div className="mt-4 rounded-xl border border-[#eadfce] bg-[#fffaf1]/70 p-3 text-center">
+                    <button
+                      type="button"
+                      onClick={continueWithSelectedSlot}
+                      className="mx-auto flex w-full max-w-md items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#c39243,#a56f25)] px-6 py-3 text-xs font-bold uppercase tracking-[0.12em] text-white shadow-[0_12px_28px_rgba(165,111,37,0.32)] transition hover:scale-[1.01]"
+                    >
+                      Continue with {selectedSlotTime}
+                      <ArrowRight size={18} />
+                    </button>
+
+                    <p className="mt-2 flex items-center justify-center gap-2 text-xs leading-4 text-[#8a7c6d]">
+                      <LockKeyhole size={13} />
+                      Selecting a table is optional. If you skip it, the system will assign the best available table when you complete the booking.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-[#d7c7b3] bg-[#fffaf1]/60 px-5 py-12 text-center">
+                  <p className="text-sm font-semibold text-[#6b5d51]">
+                    Choose guests, date, and time, then search available slots.
+                  </p>
                 </div>
-                <h3 className="font-serif text-2xl text-amber-900 mb-2">
-                  Booking Confirmed!
-                </h3>
-                <p className="text-amber-700 mb-2 text-sm font-medium">
-                  Your reservation is secure.
-                </p>
-                <p className="text-amber-600 text-xs">
-                  Redirecting to your confirmation page...
-                </p>
-              </div>
-            )}
+              )}
+            </section>
           </div>
         </div>
       </div>
