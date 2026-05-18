@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { HeroSection } from '@/components/customer/HeroSection';
 import { AboutJourneySection } from '@/components/customer/AboutJourneySection';
@@ -5,8 +6,8 @@ import { PremiumThemeSection } from '@/components/customer/PremiumThemeSection';
 import { RoyalExperienceSection } from '@/components/customer/RoyalExperienceSection';
 import { GallerySection } from '@/components/customer/GallerySection';
 import { AnimatedFoodDoodle } from '@/components/customer/AnimatedFoodDoodle';
-import { Link } from 'react-router-dom';
-import { ArrowRight, Clock3, Mail, PhoneCall, Star } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { ArrowRight, Mail, PhoneCall } from 'lucide-react';
 
 const kitchenHighlights = [
   {
@@ -47,6 +48,24 @@ const kitchenHighlights = [
 // ];
 
 export const HomePage = () => {
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    if (!hash) return;
+    const targetId = hash.replace('#', '');
+    const target = document.getElementById(targetId);
+    if (!target) return;
+
+    const scrollToTarget = () => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(scrollToTarget);
+    });
+  }, [hash]);
+
+
   return (
     <div className="relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #e8e4df 0%, #f5f1ed 100%)' }}>
       <div className="grain-overlay opacity-10" />
@@ -152,7 +171,7 @@ export const HomePage = () => {
                     Explore Menu
                   </Link>
                   <Link
-                    to="/book"
+                    to="/booking"
                     className="inline-flex items-center gap-2 rounded-full border border-[#9f7c42] bg-transparent px-6 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-[#4a2511] transition-colors hover:bg-[#fff7e8]"
                   >
                     Reserve Now <ArrowRight size={16} />
@@ -173,7 +192,7 @@ export const HomePage = () => {
                     <img
                       src={item.image}
                       alt={item.title}
-                      className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.03]"
+                      className="no-select absolute inset-0 h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.03]"
                       loading="lazy"
                     />
                     <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(51,24,12,0.18)_0%,rgba(58,27,13,0.34)_42%,rgba(42,19,9,0.76)_100%)]" />
@@ -191,7 +210,7 @@ export const HomePage = () => {
 
         <AboutJourneySection />
 
-        <section className="w-full px-6 sm:px-10 lg:px-16 xl:px-24 mt-0 -translate-y-6">
+        {/* <section className="w-full px-6 sm:px-10 lg:px-16 xl:px-24 -mt-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -207,7 +226,7 @@ export const HomePage = () => {
               Average online booking completion: 9 seconds
             </div>
           </motion.div>
-        </section>
+        </section> */}
 
         {/* <section 
           className="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8 mt-16 py-16 relative overflow-hidden rounded-2xl border border-amber-200/50 shadow-lg" 
@@ -227,7 +246,7 @@ export const HomePage = () => {
               <span className="text-amber-700 text-xs font-bold tracking-widest uppercase">Tonight is filling fast</span>
               <h2 className="font-serif text-amber-900 text-4xl sm:text-5xl leading-tight mt-2">Today&apos;s Popular Tables</h2>
             </div>
-            <Link to="/book" className="inline-flex items-center gap-2 px-6 py-2 border-2 border-amber-700 text-amber-700 hover:bg-amber-700 hover:text-white font-semibold rounded-full transition-all">
+            <Link to="/booking" className="inline-flex items-center gap-2 px-6 py-2 border-2 border-amber-700 text-amber-700 hover:bg-amber-700 hover:text-white font-semibold rounded-full transition-all">
               Book now <ArrowRight size={16} />
             </Link>
           </div>
@@ -337,7 +356,7 @@ export const HomePage = () => {
                     <Mail size={16} /> hello@luxereserve.co
                   </a>
                 </div>
-                <Link to="/book" className="inline-flex items-center gap-2 mt-7 px-8 py-3 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-full transition-all shadow-lg">
+                <Link to="/booking" className="inline-flex items-center gap-2 mt-7 px-8 py-3 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-full transition-all shadow-lg">
                   Book Now <ArrowRight size={18} />
                 </Link>
               </div>

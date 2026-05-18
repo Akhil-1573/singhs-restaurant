@@ -314,11 +314,13 @@ export const HeroSection = () => {
            Traditional flavours, Royal ambiance - A true taste of Punjab in the heart of London. Experience the rich heritage and vibrant culture of India with every bite.
           </p>
 
-          <div className="mt-3 mb-3 inline-flex rounded-full border border-[#cfa664]/45 bg-[linear-gradient(120deg,rgba(24,13,8,0.78),rgba(12,8,5,0.66))] px-3.5 py-1.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-[#f2d7a1] shadow-[0_6px_16px_rgba(0,0,0,0.28)] md:hidden">
-            Proudly Non-Halal Restaurant
-          </div>
-
-          <div className="pointer-events-auto mt-1 flex flex-col items-start gap-3 md:flex-row px-1 md:px-1 md:mt-5 lg:mt-5 no-select"> 
+          {/* <div className="inline-flex items-center gap-1.5 rounded-full bg-[#1a0f08] border border-[#5c3a1e] px-4 py-2">
+  <span className="w-1.5 h-1.5 rounded-full bg-[#c0622a] shrink-0" />
+  <span className="text-[11px] font-medium uppercase tracking-[0.13em] text-[#f0c27a]">
+    Proudly Non-Halal Restaurant
+  </span>
+</div> */}
+          <div className="mt-1 flex flex-col items-start gap-3 md:flex-row px-1 md:px-1 md:mt-0 lg:mt-5 select-none"> 
             <Link
               to="/menu"
               className="gap-2 rounded-xl border border-[#7a3e19] bg-[linear-gradient(90deg,#67130f,#7d1712)] px-4 py-2.5 md:px-4 md:py-3 lg:px-6 text-sm font-semibold uppercase tracking-[0.08em] text-[#f8dfab] transition-colors hover:bg-[linear-gradient(90deg,#7b1913,#94221a)] md:w-auto"
@@ -326,21 +328,37 @@ export const HeroSection = () => {
               Order Online
             </Link>
             <Link
-              to="/book"
-              className="inline-flex items-center gap-2 rounded-xl border border-[#1e6a4f] bg-[linear-gradient(90deg,#0f3328,#124437)] px-4 py-2.5 md:px-4 md:py-3 lg:px-6 text-sm font-semibold uppercase tracking-[0.08em] text-[#f8dfab] transition-colors hover:bg-[linear-gradient(90deg,#134132,#1a5a47)] md:w-auto"
+              to="/booking"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[#1e6a4f] bg-[linear-gradient(90deg,#0f3328,#124437)] px-6 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-[#f8dfab] transition-colors hover:bg-[linear-gradient(90deg,#134132,#1a5a47)] sm:w-auto"
             >
               Book Your Table <ArrowRight size={16} />
             </Link>
           </div>
 
-<div className="mt-8 hidden lg:inline-flex rounded-full no-select border border-[#f2d7a1]/25 bg-[linear-gradient(135deg,rgba(255,255,255,0.12),rgba(255,255,255,0.05))] px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#f2d7a1] shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur-md">
-            Proudly Non-Halal Restaurant
-          </div>
+
+          {/* <div className="mt-3 md:mt-4 lg:mt-6"> */}
+<div className="mt-3 md:mt-4 lg:mt-6">
+  <div className="inline-flex items-center gap-1.5 rounded-full border border-[#5c3a1e] bg-[#1a0f08] px-4 py-2 shadow-md transition-all duration-12 hover:scale-[1.03] hover:shadow-[0_0_18px_rgba(240,194,122,0.18)] animate-pulse">
+    
+    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#c0622a] animate-pulse" />
+
+    <span className="text-[11px] font-medium uppercase tracking-[0.13em] text-[#f0c27a]">
+      Proudly Non-Halal Restaurant
+    </span>
+  </div>
+</div>
+            {/* </div> */}
+          
+
+
         </div>
+        
       </div>
 
       <div className="no-select absolute inset-x-2 bottom-[1px] z-30 sm:inset-x-3 lg:inset-x-6 mb-0 sm:mb-1 md:mb-2 lg:mb-3">
+        
         <div className="mx-auto max-w-7xl rounded-[22px] border border-[#f2d7a1]/15 bg-[linear-gradient(135deg,rgba(18,10,7,0.58),rgba(60,39,22,0.24))] shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+        
           <div className="grid grid-cols-3 gap-x-1 gap-y-1 px-1 py-1 sm:grid-cols-3 sm:px-1 sm:py-1 lg:grid-cols-5 lg:gap-2 lg:px-5 lg:py-4">
             {operatingHighlights.map((item, index) => {
               const Icon = item.icon;

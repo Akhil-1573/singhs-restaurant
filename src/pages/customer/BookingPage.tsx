@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
   Calendar,
@@ -11,8 +11,15 @@ import {
 } from 'lucide-react';
 import { Calendar as DateCalendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
-import { useBookingStore, useTableStore } from '@/store';
-import { formatDate, formatTime } from '@/lib/mockData';
+import { useBookingStore, useCustomerAuthStore, useMenuCartStore, useTableStore } from '@/store';
+import type { RestaurantTable } from '@/types';
+import { formatDate, formatTime, generateBookingId, findOptimalTable, formatCurrency } from '@/restaurantUtils';
+import { saveBooking, getAvailableTables, sendBookingConfirmationEmail } from '@/frontendapis';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+
+// Mock Stripe key - in production, use environment variable
+const stripePromise = loadStripe('pk_test_your_publishable_key');
 
 const baseSlotTimes = [
   '11:00', '11:30',
@@ -37,23 +44,127 @@ const openingTimes = [
 
 export const BookingPage = () => {
   const navigate = useNavigate();
-
-  const {
-    bookings,
+  const location = useLocation();
+  const { customer } = useCustomerAuthStore();
+  const { 
+    selectedDate, 
+    selectedTime, 
+    selectedGuests, 
+    addBooking,
     setSelectedDate,
     setSelectedTime,
     setSelectedGuests,
   } = useBookingStore();
+  const { tables, selectedTable, setSelectedTable, updateTableStatus } = useTableStore();
+  const { items: cartItems, clearCart } = useMenuCartStore();
 
-  const { tables, selectedTable, setSelectedTable } = useTableStore();
+  const params = new URLSearchParams(location.search);
+  const skipSelectionFlag = Boolean(params.get('skipSelection'));
 
-  const [activeSearchSection, setActiveSearchSection] = useState<'guests' | 'date' | 'time' | null>(null);
+  // Form state - MUST be before early return
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    specialRequests: '',
+  });
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const hasInitializedSelectionRef = useRef(false);
+
+  useEffect(() => {
+    if (!customer) {
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      email: customer.email,
+      phone: prev.phone || customer.phone,
+    }));
+  }, [customer]);
+
+  useEffect(() => {
+    hasInitializedSelectionRef.current = false;
+  }, [location.search]);
+
+  // Initialize selection once per query-state change to avoid resetting after user continues.
+  useEffect(() => {
+    if (hasInitializedSelectionRef.current) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    const skip = params.get('skipSelection');
+
+    // If NOT coming from cart redirect, clear selection once so user sees selection UI first.
+    if (!skip) {
+      setSelectedDate('');
+      setSelectedTime('');
+      setSelectedGuests(0);
+      hasInitializedSelectionRef.current = true;
+      return;
+    }
+
+    // If coming from cart with skipSelection=1 and already selected, keep existing selection.
+    if (selectedDate && selectedTime) {
+      hasInitializedSelectionRef.current = true;
+      return;
+    }
+
+    const now = new Date();
+    const today = format(now, 'yyyy-MM-dd');
+
+    // Choose the first upcoming slot from baseSlotTimes, otherwise fallback to first slot.
+    const [hoursNow, minutesNow] = [now.getHours(), now.getMinutes()];
+    const upcoming = baseSlotTimes.find((t) => {
+      const [h, m] = t.split(':').map(Number);
+      if (h > hoursNow) return true;
+      if (h === hoursNow && m > minutesNow + 25) return true;
+      return false;
+    }) || baseSlotTimes[0];
+
+    setSelectedDate(today);
+    setSelectedTime(upcoming);
+    const cartCount = cartItems ? cartItems.reduce((total, item) => total + (item.quantity ?? 0), 0) : 0;
+    setSelectedGuests(cartCount > 0 ? Math.min(10, Math.max(1, cartCount)) : 2);
+    hasInitializedSelectionRef.current = true;
+  }, [cartItems, location.search, selectedDate, selectedTime, setSelectedDate, setSelectedTime, setSelectedGuests]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setFormData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }));
+  };
+
+  // Booking entry state
+  const [activeSearchSection, setActiveSearchSection] = useState<'guests' | 'date' | 'time' | null>('guests');
   const [draftGuests, setDraftGuests] = useState(2);
   const [draftDate, setDraftDate] = useState(new Date());
-  const [draftTimeFilter, setDraftTimeFilter] = useState('14:00');
-  const [selectedSlotTime, setSelectedSlotTime] = useState('14:00');
-  const [hasSearched, setHasSearched] = useState(false);
+  const [draftTimeFilter, setDraftTimeFilter] = useState('All Times');
+  const [selectedSlotTime, setSelectedSlotTime] = useState('');
+  const [isLoadingTables, setIsLoadingTables] = useState(false);
+  const [availableTables, setAvailableTables] = useState<Array<{ id: string; tableNumber: number; capacity: number; status: string }>>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
+  const baseDepositAmount = 5;
+  const cartSubtotal = useMemo(
+    () => cartItems.reduce((total, item) => total + item.price * item.quantity, 0),
+    [cartItems],
+  );
+  const cartItemCount = useMemo(
+    () => cartItems.reduce((total, item) => total + item.quantity, 0),
+    [cartItems],
+  );
+  const totalChargeNow = baseDepositAmount + cartSubtotal;
+  const hasPreOrder = cartSubtotal > 0;
+
+  // Time slot generation
   const guestOptions = Array.from({ length: 10 }, (_, i) => i + 1);
 
   const timeFilterOptions = [
@@ -87,31 +198,35 @@ export const BookingPage = () => {
     });
   }, [draftDate, draftGuests, draftTimeFilter]);
 
-  const availableTables = useMemo(() => {
+  const selectedBookingDate = useMemo(() => format(draftDate, 'yyyy-MM-dd'), [draftDate]);
+
+  // Fetch available tables when date, time, or guest count changes
+  useEffect(() => {
     if (!selectedSlotTime) {
-      return [];
+      setAvailableTables([]);
+      setFetchError(null);
+      return;
     }
 
-    const occupiedStatuses = ['pending', 'confirmed', 'arrived', 'seated'];
-    const selectedTime = selectedSlotTime.slice(0, 5);
+    const fetchTables = async () => {
+      setIsLoadingTables(true);
+      setFetchError(null);
+      
+      const result = await getAvailableTables(selectedBookingDate, selectedSlotTime, draftGuests);
+      
+      if (result.ok) {
+        setAvailableTables(result.tables);
+      } else {
+        setAvailableTables([]);
+        setFetchError(result.error || 'Unable to fetch available tables.');
+      }
+      
+      setIsLoadingTables(false);
+    };
 
-    return tables
-      .slice()
-      .sort((left, right) => left.tableNumber - right.tableNumber)
-      .filter((table) => {
-        const isTooSmall = table.capacity < draftGuests;
-
-        const isBookedForSlot = bookings.some(
-          (booking) =>
-            booking.date === selectedBookingDate &&
-            booking.time.slice(0, 5) === selectedTime &&
-            occupiedStatuses.includes(booking.status) &&
-            (booking.tableId === table.id || booking.tableNumber === table.tableNumber)
-        );
-
-        return table.status !== 'blocked' && !isTooSmall && !isBookedForSlot;
-      });
-  }, [bookings, draftGuests, selectedBookingDate, selectedSlotTime, tables]);
+    const debounceTimer = setTimeout(fetchTables, 300);
+    return () => clearTimeout(debounceTimer);
+  }, [selectedSlotTime, draftGuests, selectedBookingDate]);
 
   useEffect(() => {
     if (!selectedTable) {
@@ -173,41 +288,157 @@ export const BookingPage = () => {
         />
       </div>
 
-      <div className="mt-20 relative z-10 mx-auto max-w-6xl">
-        <section className="overflow-hidden rounded-[1.5rem] border border-white/70 bg-[#fffaf1]/90 shadow-[0_22px_55px_rgba(65,42,25,0.2)] backdrop-blur-xl">
-          {/* Top hero area */}
-          <div className="px-3 pb-3 pt-4 text-center sm:px-5 lg:px-6">
-            <div className='flex flex-row items-center justify-center gap-4'>
-            <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-amber-700/40 border border-amber-600/50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 relative z-10">
+          <div className="grid lg:grid-cols-[1.1fr_1fr] gap-6 sm:gap-8 items-start">
+            
+            {/* LEFT PANEL - Light Premium Info (No Scroll) */}
+            <div className="pr-4">
+              <div className="rounded-2xl bg-white/80 backdrop-blur-sm border border-black/8 shadow-lg p-8 sm:p-10">
+              <div className="mb-8">
+                <p className="text-sm font-medium text-black/60 mb-2 tracking-widest uppercase">Premium Dining Experience</p>
+                <h2 className="text-2xl sm:text-3xl font-serif text-black/90 leading-tight">
+                  Book Your Perfect Table
+                </h2>
+              </div>
+
+              <p className="text-black/70 leading-relaxed mb-8 text-base">
+                Just a stone's throw from the iconic Birmingham Bull Ring is our vibrant restaurant. Experience authentic cuisine in an elegant setting designed for unforgettable moments.
+              </p>
+
+              <div className="border-t border-black/10 pt-6">
+                <h3 className="text-lg font-serif text-black/90 mb-5">Opening Times</h3>
+                <div className="space-y-3">
+                  {[
+                    { day: 'Monday', time: '11:30am – 9:30pm' },
+                    { day: 'Tuesday', time: '11:30am – 9:30pm' },
+                    { day: 'Wednesday', time: '11:30am – 9:30pm' },
+                    { day: 'Thursday', time: '11:30am – 9:30pm' },
+                    { day: 'Friday', time: '11:30am – 10:00pm' },
+                    { day: 'Saturday', time: '11:30am – 10:00pm' },
+                    { day: 'Sunday', time: '11:30am – 8:00pm' },
+                  ].map((item) => (
+                    <div key={item.day} className="flex justify-between items-center">
+                      <span className="text-black/70 font-medium">{item.day}</span>
+                      <span className="text-black/50 text-sm">{item.time}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-8 p-4 rounded-lg bg-amber-50/60 border border-amber-200/40">
+                <p className="text-xs text-amber-900/70 leading-relaxed">
+                  <span className="font-semibold">Note:</span> A small deposit of £5 secures your reservation and helps us reduce no-shows. Fully refundable with 24 hours notice.
+                </p>
+              </div>
+            </div>
+            </div>
+
+            {/* RIGHT PANEL - Premium Dark Booking Card or Order Items when skipping selection */}
+            {skipSelectionFlag && cartItems.length > 0 ? (
+              <div className="rounded-2xl overflow-hidden shadow-2xl sticky top-6 h-fit pb-2">
+                <div className="bg-gradient-to-b from-amber-900/95 to-amber-950 px-8 py-6 text-center border-b border-amber-800/40">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-700/40 border border-amber-600/50 mb-3">
+                    <span className="text-xl font-serif text-amber-200">🧾</span>
+                  </div>
+                  <h3 className="text-white font-serif text-xl tracking-wide">YOUR PRE-ORDER</h3>
+                  <p className="text-amber-200/70 text-xs mt-1 tracking-widest uppercase">Review and edit your order before checkout</p>
+                </div>
+
+                <div className="bg-white/95 px-6 py-4 border-b border-black/8">
+                  <div className="space-y-3">
+                    {cartItems.map((item) => (
+                      <div key={item.id} className="flex items-center gap-3 rounded-lg border p-3">
+                        <img src={item.image} alt={item.name} className="w-14 h-14 rounded-md object-cover" />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-semibold text-amber-900">{item.name}</p>
+                              <p className="text-xs text-amber-700">{formatCurrency(item.price)} each</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => useMenuCartStore.getState().updateItemQuantity(item.id, Math.max(0, item.quantity - 1))}
+                                className="rounded-full border border-[#dbc7a2] bg-[#fff7ea] p-1 text-[#7d531f]"
+                              >
+                                -
+                              </button>
+                              <span className="w-8 text-center">{item.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => useMenuCartStore.getState().updateItemQuantity(item.id, item.quantity + 1)}
+                                className="rounded-full border border-[#dbc7a2] bg-[#fff7ea] p-1 text-[#7d531f]"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="px-6 py-6 bg-amber-50/60 border-t border-black/8">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Subtotal</span>
+                      <span className="font-semibold">{formatCurrency(cartSubtotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span>Deposit</span>
+                      <span className="font-semibold">{formatCurrency(baseDepositAmount)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-base font-semibold">
+                      <span>Total Charge Now</span>
+                      <span>{formatCurrency(totalChargeNow)}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-4">
+                      <button
+                        onClick={() => {
+                          // set sensible date/time and proceed to details/payment
+                          const now = new Date();
+                          const today = format(now, 'yyyy-MM-dd');
+                          const [hoursNow, minutesNow] = [now.getHours(), now.getMinutes()];
+                          const upcoming = baseSlotTimes.find((t) => {
+                            const [h, m] = t.split(':').map(Number);
+                            if (h > hoursNow) return true;
+                            if (h === hoursNow && m > minutesNow + 25) return true;
+                            return false;
+                          }) || baseSlotTimes[0];
+
+                          setSelectedDate(today);
+                          setSelectedTime(upcoming);
+                          const _cartCount = cartItems ? cartItems.reduce((t, i) => t + (i.quantity ?? 0), 0) : 0;
+                          setSelectedGuests(_cartCount > 0 ? Math.min(10, Math.max(1, _cartCount)) : 2);
+                        }}
+                        className="w-full inline-flex items-center justify-center rounded-lg bg-amber-700 px-4 py-3 text-white font-semibold"
+                      >
+                        Proceed to Details
+                      </button>
+                      <button
+                        onClick={() => {
+                          // go back to cart for large edits
+                          window.location.href = '/cart';
+                        }}
+                        className="w-full inline-flex items-center justify-center rounded-lg border border-amber-200 bg-white px-4 py-3 text-amber-700 font-semibold"
+                      >
+                        Edit Cart
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl overflow-hidden shadow-2xl sticky top-6 h-fit pb-2">
+              {/* Header */}
+              <div className="bg-gradient-to-b from-amber-900/95 to-amber-950 px-8 py-6 text-center border-b border-amber-800/40">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-amber-700/40 border border-amber-600/50 mb-3">
                   <span className="text-xl font-serif text-amber-200">🍽️</span>
                 </div>
-            <p className="font-serif text-[clamp(1.15rem,2.2vw,1.7rem)] tracking-[0.26em] text-[#1f1813]">
-              LUXE RESERVE
-            </p>
-            </div>
-
-            <div className="mt-1 flex items-center justify-center gap-3">
-              <span className="h-px w-10 bg-[#b98b42]" />
-              <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-[#b98b42]">
-                Premium Dining Experience
-              </p>
-              <span className="h-px w-10 bg-[#b98b42]" />
-            </div>
-
-            <h1 className="mt-3 font-serif text-[clamp(1.9rem,3vw,3rem)] leading-none text-[#2b2018]">
-              Book Your Perfect Table
-            </h1>
-
-            <p className="mx-auto mt-2 max-w-2xl text-xs leading-5 text-[#776b5e] sm:text-sm">
-              Just a stone&apos;s throw from the iconic Birmingham Bull Ring is our vibrant restaurant.
-              Experience authentic cuisine in an elegant setting designed for unforgettable moments.
-            </p>
-
-            {/* Small selected summary */}
-            {/* <div className="mx-auto mt-4 grid max-w-lg grid-cols-3 overflow-hidden rounded-xl border border-[#d9cbb8] bg-white/45 text-[#4b3e33] shadow-sm">
-              <div className="flex items-center justify-center gap-2 border-r border-[#d9cbb8] px-2 py-2.5 text-xs sm:text-sm font-medium">
-                <Users size={17} className="text-[#9a7338]" />
-                {draftGuests} Guests
+                <h3 className="text-white font-serif text-xl tracking-wide">LUXE RESERVE</h3>
+                <p className="text-amber-200/70 text-xs mt-1 tracking-widest uppercase">Select Your Dining Slot</p>
               </div>
 
               <div className="flex items-center justify-center gap-2 border-r border-[#d9cbb8] px-2 py-2.5 text-sm font-medium">
@@ -398,112 +629,469 @@ export const BookingPage = () => {
                 ))}
               </div>
 
-              <p className="mt-4 rounded-xl bg-[#fff7e8]/70 p-3 text-[11px] leading-5 text-[#806947]">
-                <span className="font-bold">Note:</span> A small deposit of £5 secures your reservation
-                and helps us reduce no-shows. Fully refundable with 24 hours notice.
-              </p>
-            </aside>
-
-            {/* Tables area */}
-            <section className="rounded-[1.2rem] border border-[#eadfce] bg-white/45 p-4 shadow-sm backdrop-blur-md sm:p-5">
-              {/* Exact time slots */}
-              {hasSearched && (
-                <div className="mb-4 rounded-xl border border-[#eadfce] bg-[#fffaf1]/70 p-3">
-                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-[#a8752b]">
-                    Available Times
-                  </p>
-
-                  <div className="flex flex-wrap gap-3">
-                    {visibleSlots.map((slot) => (
-                      <button
-                        key={slot.time}
-                        type="button"
-                        disabled={!slot.available}
-                        onClick={() => {
-                          setSelectedSlotTime(slot.time);
-                          setSelectedTable(null);
-                        }}
-                        className={`rounded-xl px-5 py-2 text-xs sm:text-sm font-semibold transition ${
-                          slot.available
-                            ? selectedSlotTime === slot.time
-                              ? 'bg-[#6d2131] text-white shadow-md'
-                              : 'bg-white text-[#5b4c3f] ring-1 ring-[#d9cbb8] hover:ring-[#b98b42]'
-                            : 'cursor-not-allowed bg-[#ede5da] text-[#b1a597]'
-                        }`}
-                      >
-                        {slot.time}
-                      </button>
-                    ))}
+              {/* Slots Grid - Only show after Time Preference is selected */}
+              {draftTimeFilter !== 'All Times' && (
+                <>
+                  <div className="bg-white px-6 py-6 border-t border-black/8">
+                    <div className="grid grid-cols-4 gap-3 max-h-72 overflow-y-auto">
+                      {visibleSlots.map((slot, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => slot.available && setSelectedSlotTime(slot.time)}
+                          disabled={!slot.available}
+                          className={`py-3 px-2 rounded-lg font-medium text-sm transition-all ${
+                            slot.available
+                              ? selectedSlotTime === slot.time
+                                ? 'bg-amber-700 text-white shadow-md ring-2 ring-amber-800'
+                                : 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 cursor-pointer'
+                              : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-50'
+                          }`}
+                        >
+                          {slot.time}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+
+                  {/* Continue Button */}
+                  <div className="bg-gradient-to-t from-black/5 to-transparent px-6 py-5 border-t border-black/8">
+                    <button
+                      onClick={continueWithSelectedSlot}
+                      disabled={!selectedSlotTime}
+                      className="w-full px-6 py-3.5 rounded-lg bg-amber-700 hover:bg-amber-800 disabled:bg-gray-400 text-white font-medium transition-all shadow-lg hover:shadow-xl uppercase tracking-wide text-sm disabled:cursor-not-allowed"
+                    >
+                      {selectedSlotTime ? `Continue with ${selectedSlotTime}` : 'Select a Time Slot'}
+                    </button>
+                  </div>
+
+                  {selectedSlotTime && (
+                    <div className="border-t border-black/8 bg-white px-6 py-5 space-y-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700/70">Available Tables</p>
+                          <p className="text-sm text-amber-900/75">
+                            {formatDate(draftDate.toISOString().split('T')[0])} at {formatTime(selectedSlotTime)}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                          {isLoadingTables ? 'Loading...' : `${availableTables.length} open`}
+                        </span>
+                      </div>
+
+                      {isLoadingTables ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm text-amber-700/70">
+                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-amber-300 border-r-amber-700" />
+                            Checking available tables...
+                          </div>
+                        </div>
+                      ) : fetchError ? (
+                        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                          {fetchError}
+                        </div>
+                      ) : availableTables.length > 0 ? (
+                        <div className="grid max-h-64 grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+                          {availableTables.map((table) => (
+                            <button
+                              key={table.id}
+                              type="button"
+                              onClick={() => setSelectedTable(table as RestaurantTable)}
+                              className={`rounded-2xl border px-3 py-3 text-left transition-all ${selectedTable?.id === table.id
+                                ? 'border-amber-700 bg-amber-100 shadow-md ring-2 ring-amber-200'
+                                : 'border-amber-200 bg-amber-50/70 hover:border-amber-400 hover:bg-amber-50'
+                                }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="font-serif text-lg text-amber-950">T{table.tableNumber}</p>
+                                  <p className="text-xs text-amber-700/70">{table.capacity} guests</p>
+                                </div>
+                                {selectedTable?.id === table.id && (
+                                  <span className="rounded-full bg-amber-700 px-2 py-1 text-[10px] font-semibold text-white">
+                                    Selected
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+                          <p className="font-medium mb-1">No tables available</p>
+                          <p className="text-xs text-amber-700/70">Please choose another date or time slot.</p>
+                        </div>
+                      )}
+
+                      <p className="text-xs text-amber-700/60">
+                        Selecting a table is optional. If you skip it, the system will assign the best available table when you complete the booking.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
+            </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-                <div>
-                  <h2 className="font-serif text-xl uppercase tracking-[0.12em] text-[#2b2018]">
-                    Available Tables
-                  </h2>
+  const handlePaymentSuccess = async (): Promise<{ ok: boolean; error?: string }> => {
+    setSaveError('');
 
-                  <p className="mt-0.5 text-xs text-[#7a6c60]">
-                    {formatDate(selectedBookingDate)} at{' '}
-                    {selectedSlotTime ? formatTime(selectedSlotTime) : 'select a time'}
-                  </p>
-                </div>
+    // Use customer's explicit table selection when available; otherwise fallback to auto-allocation.
+    const chosenTable = selectedTable && selectedTable.capacity >= selectedGuests && selectedTable.status !== 'blocked'
+      ? selectedTable
+      : findOptimalTable(
+          selectedGuests,
+          tables,
+          [],
+          selectedDate,
+          selectedTime
+        );
 
-                <span className="rounded-full bg-[#f2dfbf] px-4 py-2 text-sm font-bold text-[#7f5621]">
-                  {availableTables.length} open
-                </span>
+    // Create booking
+    const newBooking = {
+      id: `booking-${Date.now()}`,
+      bookingId: generateBookingId(),
+      customerName: `${customer?.firstName ?? formData.firstName} ${customer?.lastName ?? formData.lastName}`.trim(),
+      customerEmail: customer?.email ?? formData.email,
+      customerPhone: formData.phone,
+      date: selectedDate,
+      time: selectedTime,
+      guests: selectedGuests,
+      tableId: chosenTable?.id,
+      tableNumber: chosenTable?.tableNumber,
+      status: 'confirmed' as const,
+      specialRequests: formData.specialRequests,
+      depositAmount: totalChargeNow,
+      paymentStatus: 'paid' as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const saveResult = await saveBooking(newBooking);
+    if (!saveResult.ok) {
+      const errorMessage = saveResult.error ?? 'Unable to save your booking to database.';
+      setSaveError(errorMessage);
+      console.warn('Backend booking save failed:', errorMessage);
+      return { ok: false, error: errorMessage };
+    }
+
+    addBooking(newBooking);
+
+    if (chosenTable) {
+      const timeSlot = new Date(`${selectedDate}T${selectedTime}:00`).toISOString();
+      updateTableStatus(chosenTable.id, 'booked', timeSlot);
+    }
+
+    void sendBookingConfirmationEmail(newBooking).then((result) => {
+      if (!result.ok) {
+        console.warn('Booking confirmation email was not sent:', result.error);
+      }
+    });
+
+    setIsConfirmed(true);
+
+    // Navigate to confirmation page after brief delay
+    setTimeout(() => {
+      setSelectedTable(null);
+      clearCart();
+      navigate('/confirmation', {
+        state: {
+          booking: newBooking,
+          charges: {
+            baseDepositAmount,
+            cartSubtotal,
+            totalPaid: totalChargeNow,
+            itemCount: cartItemCount,
+          },
+          saveOk: true,
+        },
+      });
+    }, 1500);
+
+    return { ok: true };
+  };
+
+  const isDetailsValid = Boolean(customer?.firstName && customer?.lastName && customer?.email && formData.phone);
+
+  return (
+    <div className="min-h-screen pt-20 pb-16 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #e8e4df 0%, #f5f1ed 100%)' }}>
+      
+      {/* Full-height decorative rose - left side (mirrored) */}
+      <div className="absolute inset-y-0 -left-32 w-[450px] opacity-15 pointer-events-none" style={{ transform: 'scaleX(-1)' }}>
+        <img src="/bookpagerose.png" alt="" className="w-full h-full object-cover" />
+      </div>
+      
+      {/* Full-height decorative rose - right side */}
+      <div className="absolute inset-y-0 -right-32 w-[450px] opacity-15 pointer-events-none">
+        <img src="/bookpagerose.png" alt="" className="w-full h-full object-cover" />
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12 relative z-10">
+        <div className="grid lg:grid-cols-[1.1fr_1fr] gap-6 sm:gap-8 items-start">
+          
+          {/* LEFT PANEL - Booking Summary (No Scroll) */}
+          <div className="pr-4">
+            <div className="rounded-2xl overflow-hidden shadow-lg bg-gradient-to-b from-amber-50 to-yellow-50 border border-amber-200/50">
+              {/* Header */}
+              <div className="bg-white px-8 py-6 text-center border-b border-amber-100">
+                <div className="text-4xl mb-2">🍽️</div>
+                <h3 className="text-amber-900 font-serif text-sm tracking-widest uppercase font-semibold">LUXE RESERVE / YOUR RESERVATION</h3>
               </div>
 
-              {hasSearched && selectedSlotTime ? (
-                <>
-                  {availableTables.length > 0 ? (
-                    <div className="grid max-h-[260px] gap-3 overflow-y-auto pr-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {availableTables.map((table) => {
-                        const isSelected = selectedTable?.id === table.id;
-
-                        return (
-                          <button
-                            key={table.id}
-                            type="button"
-                            onClick={() => setSelectedTable(table)}
-                            className={`group relative min-h-[88px] rounded-xl border p-4 text-left transition ${
-                              isSelected
-                                ? 'border-[#b98b42] bg-[#fff4df] shadow-[0_14px_32px_rgba(185,139,66,0.22)] ring-2 ring-[#d7b56f]/40'
-                                : 'border-[#e4d7c6] bg-[#fffdf8]/80 hover:border-[#b98b42] hover:bg-[#fffaf1]'
-                            }`}
-                          >
-                            {isSelected && (
-                              <span className="absolute right-4 top-4 rounded-full bg-[#fff8e7] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#a8752b]">
-                                Selected
-                              </span>
-                            )}
-
-                            <div className="flex h-full items-center justify-between gap-4">
-                              <div>
-                                <p className="font-serif text-3xl leading-none text-[#2b2018]">
-                                  T{table.tableNumber}
-                                </p>
-
-                                <p className="mt-2 text-xs font-medium text-[#74675a]">
-                                  {table.capacity} guests
-                                </p>
-                              </div>
-
-                              <div className="text-right opacity-45 transition group-hover:opacity-70">
-                                <div className="text-3xl">♨</div>
-                                <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[#9a7338]">
-                                  Dining
-                                </p>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
+              {/* Reservation Details */}
+              <div className="px-8 py-8">
+                <div className="space-y-5">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                      <Calendar size={20} className="text-amber-700" />
                     </div>
-                  ) : (
-                    <div className="rounded-2xl border border-[#eadfce] bg-[#fff7e8] px-5 py-5 text-sm text-[#7a5b32]">
-                      No tables are available for this date and time. Choose another slot.
+                    <div>
+                      <p className="text-amber-900/60 text-xs font-medium uppercase">Date</p>
+                      <p className="text-amber-900 font-medium">{formatDate(selectedDate)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                      <Clock size={20} className="text-amber-700" />
+                    </div>
+                    <div>
+                      <p className="text-amber-900/60 text-xs font-medium uppercase">Time</p>
+                      <p className="text-amber-900 font-medium">{formatTime(selectedTime)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                      <Users size={20} className="text-amber-700" />
+                    </div>
+                    <div>
+                      <p className="text-amber-900/60 text-xs font-medium uppercase">Party Size</p>
+                      <p className="text-amber-900 font-medium">{selectedGuests} {selectedGuests === 1 ? 'Guest' : 'Guests'}</p>
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-amber-200 space-y-3">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-amber-700/20 flex items-center justify-center flex-shrink-0">
+                        <span className="text-amber-700 font-bold text-lg">£</span>
+                      </div>
+                      <div>
+                        <p className="text-amber-900/60 text-xs font-medium uppercase">Reservation Deposit</p>
+                        <p className="text-amber-700 font-serif text-xl font-semibold">{formatCurrency(baseDepositAmount)}</p>
+                      </div>
+                    </div>
+
+                    {hasPreOrder && (
+                      <div className="flex items-center justify-between rounded-lg border border-amber-200/70 bg-white/65 px-3 py-2">
+                        <p className="text-amber-900/75 text-xs font-semibold uppercase">Pre-order Dishes ({cartItemCount})</p>
+                        <p className="text-amber-900 font-semibold">{formatCurrency(cartSubtotal)}</p>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between rounded-lg border border-amber-300/80 bg-amber-100/70 px-3 py-2">
+                      <p className="text-amber-900 text-xs font-bold uppercase tracking-wide">Total Charge Now</p>
+                      <p className="text-amber-900 font-serif text-xl font-semibold">{formatCurrency(totalChargeNow)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Edit Selection Button */}
+                <button
+                  onClick={() => {
+                    setSelectedDate('');
+                    setSelectedTime('');
+                    setSelectedGuests(0);
+                    setSelectedSlotTime('');
+                    setSelectedTable(null);
+                    setDraftGuests(2);
+                    setDraftDate(new Date());
+                    setDraftTimeFilter('All Times');
+                    setActiveSearchSection('guests');
+                    setStep(1);
+                  }}
+                  className="w-full mt-8 px-4 py-2.5 rounded-lg border border-amber-700 text-amber-700 hover:bg-amber-50 font-medium transition-all text-sm"
+                >
+                  Change Selection
+                </button>
+              </div>
+
+              {/* Step Indicator */}
+              <div className="bg-amber-100/50 px-8 py-6 border-t border-amber-200">
+                <div className="flex items-center justify-center gap-4">
+                  <div className="flex flex-col items-center">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= 1 ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-700'}`}>
+                      1
+                    </div>
+                    <p className={`text-xs mt-2 font-medium ${step >= 1 ? 'text-amber-900' : 'text-amber-700/60'}`}>Details</p>
+                  </div>
+                  
+                  <div className={`flex-1 h-0.5 ${step >= 2 ? 'bg-amber-700' : 'bg-amber-200'}`} />
+                  
+                  <div className="flex flex-col items-center">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= 2 ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-700'}`}>
+                      2
+                    </div>
+                    <p className={`text-xs mt-2 font-medium ${step >= 2 ? 'text-amber-900' : 'text-amber-700/60'}`}>Payment</p>
+                  </div>
+                  
+                  <div className={`flex-1 h-0.5 ${step >= 3 ? 'bg-amber-700' : 'bg-amber-200'}`} />
+                  
+                  <div className="flex flex-col items-center">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step >= 3 ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-700'}`}>
+                      3
+                    </div>
+                    <p className={`text-xs mt-2 font-medium ${step >= 3 ? 'text-amber-900' : 'text-amber-700/60'}`}>Confirm</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Info Card */}
+              <div className="bg-amber-50/60 px-8 py-5 border-t border-black/10">
+                <p className="text-xs text-amber-900/70 leading-relaxed">
+                  <span className="font-semibold">Note:</span>{' '}
+                  {hasPreOrder
+                    ? `${formatCurrency(baseDepositAmount)} deposit + ${formatCurrency(cartSubtotal)} pre-order will be charged now.`
+                    : `${formatCurrency(baseDepositAmount)} deposit secures your reservation.`}{' '}
+                  Fully refundable with 24 hours notice.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT PANEL - Form Steps */}
+          <div className="rounded-3xl overflow-hidden border border-amber-200/70 bg-[linear-gradient(180deg,rgba(255,252,245,0.95),rgba(255,247,231,0.9))] shadow-[0_18px_40px_rgba(85,54,21,0.16)] h-fit sticky top-6">
+            {/* Header */}
+            <div className="px-8 py-6 text-center border-b border-amber-200/70 bg-[linear-gradient(130deg,rgba(44,26,15,0.95),rgba(73,45,22,0.96),rgba(27,23,30,0.95))]">
+              <h3 className="text-[#FFF8EE] font-serif text-[1.7rem] leading-none tracking-[0.01em]">Complete Your Details</h3>
+              <p className="text-amber-200/80 text-[11px] mt-2 tracking-[0.18em] uppercase">Secure Checkout</p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <span className={`h-2 w-8 rounded-full transition-colors ${step >= 1 ? 'bg-amber-300' : 'bg-white/30'}`} />
+                <span className={`h-2 w-8 rounded-full transition-colors ${step >= 2 ? 'bg-amber-300' : 'bg-white/30'}`} />
+                <span className={`h-2 w-8 rounded-full transition-colors ${step >= 3 || isConfirmed ? 'bg-amber-300' : 'bg-white/30'}`} />
+              </div>
+            </div>
+
+            {/* Step 1: Contact Details */}
+            {step === 1 && (
+              <div className="px-8 py-8">
+                <h3 className="font-serif text-[1.8rem] text-amber-950 mb-2 leading-none">Your Information</h3>
+                <p className="text-sm text-amber-900/70 mb-6">Your account details are used for this booking.</p>
+                
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="firstName" className="text-amber-900 mb-2 block text-sm font-semibold">First Name *</Label>
+                      <Input
+                        id="firstName"
+                        name="firstName"
+                        autoComplete="given-name"
+                        value={formData.firstName}
+                        readOnly
+                        className="h-11 rounded-xl bg-white border border-amber-200/80 text-amber-950 placeholder:text-amber-700/45 focus-visible:ring-amber-300"
+                        placeholder="John"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="lastName" className="text-amber-900 mb-2 block text-sm font-semibold">Last Name *</Label>
+                      <Input
+                        id="lastName"
+                        name="lastName"
+                        autoComplete="family-name"
+                        value={formData.lastName}
+                        readOnly
+                        className="h-11 rounded-xl bg-white border border-amber-200/80 text-amber-950 placeholder:text-amber-700/45 focus-visible:ring-amber-300"
+                        placeholder="Doe"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="email" className="text-amber-900 mb-2 block text-sm font-semibold">Email *</Label>
+                    <Input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      value={formData.email}
+                      readOnly
+                      className="h-11 rounded-xl bg-white border border-amber-200/80 text-amber-950 placeholder:text-amber-700/45 focus-visible:ring-amber-300"
+                      placeholder="john@example.com"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="phone" className="text-amber-900 mb-2 block text-sm font-semibold">Phone *</Label>
+                    <div className="flex gap-2">
+                      <div className="w-16 pt-2.5">
+                        <span className="text-amber-900 text-sm font-semibold">+ 44</span>
+                      </div>
+                      <Input
+                        id="phone"
+                        name="phone"
+                        type="tel"
+                        autoComplete="tel"
+                        value={formData.phone}
+                        onChange={handleInputChange}
+                        className="h-11 flex-1 rounded-xl bg-white border border-amber-200/80 text-amber-950 placeholder:text-amber-700/45 focus-visible:ring-amber-300"
+                        placeholder="7123 456789"
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-amber-800/70">Need to change your name or email? Update your account and sign in again.</p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="specialRequests" className="text-amber-900 mb-2 block text-sm font-semibold">
+                      Special Requests
+                    </Label>
+                    <textarea
+                      id="specialRequests"
+                      name="specialRequests"
+                      value={formData.specialRequests}
+                      onChange={handleInputChange}
+                      className="w-full h-24 resize-none rounded-xl bg-white border border-amber-200/80 px-3 py-2 text-sm text-amber-950 placeholder:text-amber-700/45 outline-none focus:ring-2 focus:ring-amber-300"
+                      placeholder="e.g., dietary requirements, special occasion"
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  onClick={() => setStep(2)}
+                  disabled={!isDetailsValid}
+                  className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white font-semibold mt-6 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  Continue to Payment
+                </Button>
+
+                <button
+                  onClick={() => {
+                    setSelectedDate('');
+                    setSelectedTime('');
+                    setSelectedGuests(0);
+                  }}
+                  className="w-full text-center text-amber-700 hover:text-amber-900 transition-colors mt-3 text-sm font-semibold"
+                >
+                  Back to booking
+                </button>
+              </div>
+            )}
+
+            {/* Step 2: Payment */}
+            {step === 2 && (
+              <div className="px-8 py-8">
+                <h3 className="font-serif text-[1.8rem] text-amber-950 mb-2 leading-none">Payment Details</h3>
+                <p className="text-sm text-amber-900/70 mb-4">Review and pay your reservation charges securely.</p>
+
+                <div className="mb-6 rounded-xl border border-amber-200/80 bg-white/80 p-4 text-sm">
+                  <div className="flex items-center justify-between text-amber-900/80">
+                    <span>Reservation deposit</span>
+                    <span className="font-semibold">{formatCurrency(baseDepositAmount)}</span>
+                  </div>
+                  {hasPreOrder && (
+                    <div className="mt-2 flex items-center justify-between text-amber-900/80">
+                      <span>Pre-order menu ({cartItemCount} item{cartItemCount === 1 ? '' : 's'})</span>
+                      <span className="font-semibold">{formatCurrency(cartSubtotal)}</span>
                     </div>
                   )}
 
@@ -532,8 +1120,8 @@ export const BookingPage = () => {
               )}
             </section>
           </div>
-        </section>
+        </div>
       </div>
-    </main>
+    </div>
   );
 };

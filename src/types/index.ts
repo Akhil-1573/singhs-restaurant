@@ -2,15 +2,25 @@
 
 export type UserRole = 'admin' | 'employee' | 'customer';
 
-export type MenuCategory = 'starters' | 'mains' | 'biryani' | 'bread' | 'dessert';
+export type MenuCategory = string;
 
 export interface User {
   id: string;
   email: string;
   role: UserRole;
+  isBlocked?: boolean;
   firstName: string;
   lastName: string;
   phone?: string;
+  createdAt: string;
+}
+
+export interface CustomerAccount {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
   createdAt: string;
 }
 

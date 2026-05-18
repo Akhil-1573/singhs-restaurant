@@ -18,10 +18,9 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { useBookingStore } from '@/store';
 import { useTableStore } from '@/store';
-import { formatTime, generateTimeSlots } from '@/lib/mockData';
+import { formatTime, generateTimeSlots } from '@/restaurantUtils';
 import { Skeleton } from '@/components/ui/skeleton';
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
-import { getAvailableSlotsFromSupabase, getOccupiedTableIdsFromSupabase } from '@/lib/supabaseBookingApi';
+import { getAvailableSlots, getOccupiedTableIds } from '@/frontendapis';
 import type { BookingCardProps } from '@/types';
 
 const guestOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -124,15 +123,15 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
             activeStatuses.includes(booking.status)
         );
 
-        const isTableOccupiedInSupabase = occupiedSet.has(table.id);
+        const isTableOccupiedInBackend = occupiedSet.has(table.id);
 
         const isBlocked = ['blocked', 'booked', 'reserved', 'seated'].includes(table.status);
         const canFitParty = table.capacity >= guests;
-        const isUnavailable = isBlocked || isTableOccupiedInSupabase || hasActiveBooking || !canFitParty;
+        const isUnavailable = isBlocked || isTableOccupiedInBackend || hasActiveBooking || !canFitParty;
 
         return {
           ...table,
-          isTableOccupiedInSupabase,
+          isTableOccupiedInBackend,
           hasActiveBooking,
           canFitParty,
           isUnavailable,
@@ -165,25 +164,21 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
     let isMounted = true;
 
     const loadOccupiedTables = async () => {
-      if (!isSupabaseConfigured) {
-        setOccupiedTableIds([]);
-        return;
-      }
-
       const dateString = format(date, 'yyyy-MM-dd');
-      const occupiedResult = await getOccupiedTableIdsFromSupabase(dateString, time);
+      const occupiedResult = await getOccupiedTableIds(dateString, time);
 
       if (!isMounted) {
         return;
       }
 
       if (!occupiedResult.ok) {
-        console.warn('Failed to fetch occupied tables from Supabase:', occupiedResult.error);
+        console.warn('Failed to fetch occupied tables from backend:', occupiedResult.error);
         setOccupiedTableIds([]);
         return;
       }
 
-      setOccupiedTableIds(occupiedResult.tableIds);
+      // Only show tables that are NOT occupied and CAN fit the party
+      setOccupiedTableIds(occupiedResult.tableIds || []);
     };
 
     void loadOccupiedTables();
@@ -191,34 +186,21 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
     return () => {
       isMounted = false;
     };
-  }, [date, occupancyRefreshTick, time]);
+  }, [date, guests, occupancyRefreshTick, time]);
 
   useEffect(() => {
-    const client = supabase;
-
-    if (!client) {
+    if (!date || !time) {
       return;
     }
 
-    const channel = client
-      .channel('booking-feed')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'bookings' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setRecentBookings((prev) => Math.min(prev + 1, 40));
-          }
-
-          setOccupancyRefreshTick((prev) => prev + 1);
-        }
-      )
-      .subscribe();
+    const refreshTimer = window.setInterval(() => {
+      setOccupancyRefreshTick((prev) => prev + 1);
+    }, 30000);
 
     return () => {
-      void client.removeChannel(channel);
+      window.clearInterval(refreshTimer);
     };
-  }, []);
+  }, [date, time]);
 
   useEffect(() => {
     if (!date) {
@@ -232,14 +214,12 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
       const dateString = format(date, 'yyyy-MM-dd');
       let rawSlots = generateTimeSlots(dateString);
 
-      if (isSupabaseConfigured) {
-        const slotResult = await getAvailableSlotsFromSupabase(dateString, guests);
+      const slotResult = await getAvailableSlots(dateString, guests);
 
-        if (slotResult.ok && slotResult.slots.length > 0) {
-          rawSlots = slotResult.slots;
-        } else if (!slotResult.ok) {
-          console.warn('Failed to fetch available slots from Supabase:', slotResult.error);
-        }
+      if (slotResult.ok && slotResult.slots.length > 0) {
+        rawSlots = slotResult.slots;
+      } else if (!slotResult.ok) {
+        console.warn('Failed to fetch available slots from backend:', slotResult.error);
       }
 
       const now = new Date();
@@ -290,11 +270,23 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
       return;
     }
 
+    // Refresh occupied tables when entering table selection step to show most current availability
+    if (date && time) {
+      const dateString = format(date, 'yyyy-MM-dd');
+      const refreshOccupied = async () => {
+        const occupiedResult = await getOccupiedTableIds(dateString, time);
+        if (occupiedResult.ok) {
+          setOccupiedTableIds(occupiedResult.tableIds || []);
+        }
+      };
+      void refreshOccupied();
+    }
+
     setIsLoadingTables(true);
     const timer = window.setTimeout(() => setIsLoadingTables(false), 650);
 
     return () => window.clearTimeout(timer);
-  }, [step, date, time, guests]);
+  }, [step, date, time]);
 
   useEffect(() => {
     if (step !== 1) {
@@ -342,7 +334,7 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
       setAvailableSlots(timeSlots);
       
       setIsChecking(false);
-      navigate(`/book/checkout?date=${dateStr}&time=${time}&guests=${guests}&tableId=${selectedTableId}`);
+      navigate('/booking');
     }, 800);
   };
 
@@ -528,37 +520,28 @@ export const BookingCard = ({ compact = false }: BookingCardProps) => {
             <>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <p className="text-[#A9B1BE]">
-                  {availableTableCount} of {tableSeatMap.length} tables available for {guests} guests at {time || '--:--'}.
+                  {availableTableCount} available tables for {guests} {guests === 1 ? 'guest' : 'guests'} at {time ? formatTime(time) : '--:--'}.
                 </p>
                 <div className="flex flex-wrap items-center gap-3 text-[#A9B1BE]">
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-400/70" /> Available</span>
                   <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#D4AF37]" /> Selected</span>
-                  <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-400/70" /> Unavailable</span>
                 </div>
               </div>
 
               <div className="max-h-80 overflow-y-auto pr-1">
                 <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 gap-2.5">
-                  {tableSeatMap.map((table) => {
+                  {tableSeatMap.filter((table) => !table.isUnavailable).map((table) => {
                     const isSelected = selectedTableId === table.id;
-                    const isDisabled = table.isUnavailable;
 
                     return (
                       <button
                         key={table.id}
                         type="button"
-                        disabled={isDisabled}
-                        onClick={() => {
-                          if (!isDisabled) {
-                            setSelectedTableId(table.id);
-                          }
-                        }}
+                        onClick={() => setSelectedTableId(table.id)}
                         className={`rounded-lg border px-2 py-2.5 text-center transition-all duration-200 ${
                           isSelected
                             ? 'border-[#D4AF37] bg-[rgba(212,175,55,0.22)] text-[#F8E8B2]'
-                            : isDisabled
-                              ? 'cursor-not-allowed border-rose-500/30 bg-rose-500/10 text-rose-200/70'
-                              : 'border-[rgba(255,255,255,0.13)] bg-[rgba(255,255,255,0.05)] text-[#DDE3ED] hover:border-emerald-400/70 hover:bg-emerald-400/10'
+                            : 'border-[rgba(255,255,255,0.13)] bg-[rgba(255,255,255,0.05)] text-[#DDE3ED] hover:border-emerald-400/70 hover:bg-emerald-400/10'
                         }`}
                         title={`Table ${table.tableNumber} · capacity ${table.capacity}`}
                       >

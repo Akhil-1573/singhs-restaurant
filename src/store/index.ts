@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { isSupabaseConfigured } from '@/lib/supabase';
-import { updateBookingStatusInSupabase, updateTableStatusInSupabase } from '@/lib/supabaseAdminApi';
+import { updateBookingStatus, updateTableStatus } from '@/frontendapis';
 import type { 
   User, 
+  CustomerAccount,
   RestaurantTable, 
   Booking, 
   BookingStatus, 
@@ -56,46 +56,57 @@ interface BookingState {
   setIsLoading: (loading: boolean) => void;
 }
 
-export const useBookingStore = create<BookingState>()((set) => ({
-  bookings: [],
-  currentBooking: null,
-  selectedDate: '',
-  selectedTime: '',
-  selectedGuests: 2,
-  availableSlots: [],
-  isLoading: false,
-  setBookings: (bookings) => set({ bookings }),
-  addBooking: (booking) => set((state) => ({ 
-    bookings: [booking, ...state.bookings] 
-  })),
-  updateBooking: (booking) => set((state) => ({
-    bookings: state.bookings.map((b) => 
-      b.id === booking.id ? booking : b
-    ),
-  })),
-  deleteBooking: (bookingId) => set((state) => ({
-    bookings: state.bookings.filter((b) => b.id !== bookingId),
-  })),
-  setCurrentBooking: (booking) => set({ currentBooking: booking }),
-  setSelectedDate: (date) => set({ selectedDate: date }),
-  setSelectedTime: (time) => set({ selectedTime: time }),
-  setSelectedGuests: (guests) => set({ selectedGuests: guests }),
-  setAvailableSlots: (slots) => set({ availableSlots: slots }),
-  updateBookingStatus: (bookingId, status) => {
-    set((state) => ({
-      bookings: state.bookings.map((b) =>
-        b.id === bookingId ? { ...b, status } : b
-      ),
-    }));
+export const useBookingStore = create<BookingState>()(
+  persist(
+    (set) => ({
+      bookings: [],
+      currentBooking: null,
+      selectedDate: '',
+      selectedTime: '',
+      selectedGuests: 2,
+      availableSlots: [],
+      isLoading: false,
+      setBookings: (bookings) => set({ bookings }),
+      addBooking: (booking) => set((state) => ({ 
+        bookings: [booking, ...state.bookings] 
+      })),
+      updateBooking: (booking) => set((state) => ({
+        bookings: state.bookings.map((b) => 
+          b.id === booking.id ? booking : b
+        ),
+      })),
+      deleteBooking: (bookingId) => set((state) => ({
+        bookings: state.bookings.filter((b) => b.id !== bookingId),
+      })),
+      setCurrentBooking: (booking) => set({ currentBooking: booking }),
+      setSelectedDate: (date) => set({ selectedDate: date }),
+      setSelectedTime: (time) => set({ selectedTime: time }),
+      setSelectedGuests: (guests) => set({ selectedGuests: guests }),
+      setAvailableSlots: (slots) => set({ availableSlots: slots }),
+      updateBookingStatus: (bookingId, status) => {
+        set((state) => ({
+          bookings: state.bookings.map((b) =>
+            b.id === bookingId ? { ...b, status } : b
+          ),
+        }));
 
-    if (isSupabaseConfigured) {
-      void updateBookingStatusInSupabase(bookingId, status).catch((error: unknown) => {
-        console.warn('Failed to sync booking status to Supabase:', error);
-      });
+        void updateBookingStatus(bookingId, status).catch((error: unknown) => {
+          console.warn('Failed to sync booking status to backend:', error);
+        });
+      },
+      setIsLoading: (loading) => set({ isLoading: loading }),
+    }),
+    {
+      name: 'booking-storage',
+      partialize: (state) => ({
+        selectedDate: state.selectedDate,
+        selectedTime: state.selectedTime,
+        selectedGuests: state.selectedGuests,
+        currentBooking: state.currentBooking,
+      }),
     }
-  },
-  setIsLoading: (loading) => set({ isLoading: loading }),
-}));
+  )
+);
 
 // Table Store
 interface TableState {
@@ -118,11 +129,9 @@ export const useTableStore = create<TableState>()((set) => ({
       ),
     }));
 
-    if (isSupabaseConfigured) {
-      void updateTableStatusInSupabase(tableId, status, timeSlot).catch((error: unknown) => {
-        console.warn('Failed to sync table status to Supabase:', error);
-      });
-    }
+    void updateTableStatus(tableId, status, timeSlot).catch((error: unknown) => {
+      console.warn('Failed to sync table status to backend:', error);
+    });
   },
   updateTablePosition: (tableId, x, y) => set((state) => ({
     tables: state.tables.map((t) =>
@@ -187,26 +196,54 @@ export const useSettingsStore = create<SettingsState>()((set) => ({
 // Menu Store
 interface MenuState {
   menuItems: MenuItem[];
+  menuCategories: string[];
+  setMenuCategories: (categories: string[]) => void;
   setMenuItems: (menuItems: MenuItem[]) => void;
   upsertMenuItem: (menuItem: MenuItem) => void;
   removeMenuItem: (menuItemId: string) => void;
+  addMenuCategory: (category: string) => void;
 }
+
+const normalizeCategory = (category: string) => category.trim();
+
+const mergeCategories = (existingCategories: string[], nextCategories: string[]) =>
+  Array.from(new Set([...existingCategories, ...nextCategories.map(normalizeCategory).filter(Boolean)])).sort((a, b) => a.localeCompare(b));
 
 export const useMenuStore = create<MenuState>()(
   persist(
     (set) => ({
       menuItems: [],
-      setMenuItems: (menuItems) => set({ menuItems }),
+      menuCategories: [],
+      setMenuCategories: (categories) =>
+        set({ menuCategories: mergeCategories([], categories) }),
+      setMenuItems: (menuItems) =>
+        set((state) => ({
+          menuItems,
+          menuCategories: mergeCategories(state.menuCategories, menuItems.map((item) => item.category)),
+        })),
+      addMenuCategory: (category) => {
+        const normalized = normalizeCategory(category);
+
+        if (!normalized) {
+          return;
+        }
+
+        set((state) => ({
+          menuCategories: mergeCategories(state.menuCategories, [normalized]),
+        }));
+      },
       upsertMenuItem: (menuItem) =>
         set((state) => {
           const exists = state.menuItems.some((item) => item.id === menuItem.id);
+          const nextCategories = mergeCategories(state.menuCategories, [menuItem.category]);
 
           if (!exists) {
-            return { menuItems: [...state.menuItems, menuItem] };
+            return { menuItems: [...state.menuItems, menuItem], menuCategories: nextCategories };
           }
 
           return {
             menuItems: state.menuItems.map((item) => (item.id === menuItem.id ? menuItem : item)),
+            menuCategories: nextCategories,
           };
         }),
       removeMenuItem: (menuItemId) =>
@@ -214,7 +251,10 @@ export const useMenuStore = create<MenuState>()(
           menuItems: state.menuItems.filter((item) => item.id !== menuItemId),
         })),
     }),
-    { name: 'menu-storage' }
+    {
+      name: 'menu-storage',
+      partialize: (state) => ({ menuItems: state.menuItems }),
+    }
   )
 );
 
@@ -288,6 +328,26 @@ interface MockDataState {
 }
 
 export const useMockDataStore = create<MockDataState>()((set) => ({
-  isMockMode: !isSupabaseConfigured,
+  isMockMode: false,
   toggleMockMode: () => set((state) => ({ isMockMode: !state.isMockMode })),
 }));
+
+// Customer Auth Store
+interface CustomerAuthState {
+  customer: CustomerAccount | null;
+  isCustomerAuthenticated: boolean;
+  loginCustomer: (customer: CustomerAccount) => void;
+  logoutCustomer: () => void;
+}
+
+export const useCustomerAuthStore = create<CustomerAuthState>()(
+  persist(
+    (set) => ({
+      customer: null,
+      isCustomerAuthenticated: false,
+      loginCustomer: (customer) => set({ customer, isCustomerAuthenticated: true }),
+      logoutCustomer: () => set({ customer: null, isCustomerAuthenticated: false }),
+    }),
+    { name: 'customer-auth-storage' }
+  )
+);
